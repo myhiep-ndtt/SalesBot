@@ -19,7 +19,6 @@ pending_orders = {}
 @app.route('/')
 def home():
     return "Bot is running 24/7!", 200
-
 def get_db():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_json = os.getenv("GOOGLE_SHEETS_JSON")
