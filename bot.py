@@ -13,7 +13,6 @@ SEPAY_API_KEY = os.getenv("SEPAY_API_KEY")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 PORT = int(os.getenv("PORT", "8000"))
 
-# BIẾN app DÀNH RIÊNG CHO FLASK
 app = Flask(__name__)
 pending_orders = {} 
 
@@ -111,15 +110,37 @@ async def show_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "📊 **DANH SÁCH SẢN PHẨM**\n\n"
     keyboard = []
     for row in data:
-        msg += f"{row['Icon']} *{row['Tên Sản Phẩm']}*: `{row['Giá Tiền']:,}`đ\n"
+        # Tạo lệnh tương ứng: CapCut Pro -> /buycapcut
+        cmd_name = "/buy" + re.sub(r'[^a-zA-Z0-9]', '', row['Tên Sản Phẩm']).lower().replace("pro", "").replace("premium", "")
+        msg += f"{row['Icon']} *{row['Tên Sản Phẩm']}*: `{row['Giá Tiền']:,}`đ\n└ 📥 Mua nhanh: {cmd_name}\n\n"
         if "Còn hàng" in str(row['Trạng Thái']):
             keyboard.append([InlineKeyboardButton(f"Mua {row['Tên Sản Phẩm']}", callback_query_data=f"buy_{row['Tên Sản Phẩm']}")])
     
-    # Xử lý cho cả MessageHandler và CommandHandler
-    if update.message:
-        await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await update.callback_query.message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.effective_message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def quick_buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    command = update.message.text.split('@')[0].replace("/", "").replace("buy", "").lower()
+    data = get_db().worksheet("DataBot").get_all_records()
+    
+    selected_product = None
+    for row in data:
+        clean_name = re.sub(r'[^a-zA-Z0-9]', '', row['Tên Sản Phẩm']).lower().replace("pro", "").replace("premium", "")
+        if clean_name == command:
+            selected_product = row
+            break
+            
+    if not selected_product:
+        return # Nếu gõ sai lệnh thì không phản hồi hoặc báo lỗi tùy bạn
+
+    product = selected_product['Tên Sản Phẩm']
+    price = int(selected_product['Giá Tiền'])
+    order_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    pending_orders[order_id] = {"user_id": update.effective_user.id, "product": product, "price": price}
+    context.user_data['last_id'] = order_id
+    
+    qr_url = f"https://img.vietqr.io/image/{BANK_ID}-{BANK_ACC}-compact2.png?amount={price}&addInfo={order_id}"
+    await update.message.reply_photo(photo=qr_url, caption=f"💳 **THANH TOÁN**\n📦 SP: {product}\n💰 Giá: `{price:,}`đ\n📝 Nội dung: `{order_id}`", 
+                                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Kiểm tra thanh toán", callback_query_data="check_manual")]]))
 
 async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -155,28 +176,6 @@ async def verify_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
 
 # --- ADMIN COMMANDS ---
-async def admin_import_capcut(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', update.message.text)
-    if emails:
-        new_rows = [["CapCut Pro", e, "hung@1234", "Sẵn sàng", f"Auto {datetime.datetime.now().strftime('%d/%m')}"] for e in emails]
-        get_db().worksheet("acc").append_rows(new_rows)
-        await update.message.reply_text(f"✅ Đã nạp `{len(emails)}` acc CapCut Pro thành công!")
-
-async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    msg = update.message.text.replace("/broadcast", "").strip()
-    if not msg: return
-    users = get_db().worksheet("Users").col_values(1)[1:]
-    success = 0
-    for uid in users:
-        try:
-            await context.bot.send_message(chat_id=uid, text=f"🔔 **THÔNG BÁO TỪ HỆ THỐNG**\n\n{msg}", parse_mode='Markdown')
-            success += 1
-            await asyncio.sleep(0.05)
-        except: continue
-    await update.message.reply_text(f"✅ Đã gửi tới {success}/{len(users)} người dùng.")
-
 async def admin_clear_sold(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return    
     try:
@@ -200,7 +199,7 @@ async def admin_clear_sold(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("ℹ️ Không có tài khoản nào ở trạng thái 'Đã bán' để xóa.")
     except Exception as e:
-        await update.message.reply_text(f"❌ Lỗi khi dọn dẹp: {e}")
+        await update.message.reply_text(f"❌ Lỗi: {e}")
 
 async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
@@ -220,27 +219,42 @@ async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Đã nhập thành công {len(new_rows)} acc cho `{product}`")
         except: pass
 
+async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    msg = update.message.text.replace("/broadcast", "").strip()
+    if not msg: return
+    users = get_db().worksheet("Users").col_values(1)[1:]
+    success = 0
+    for uid in users:
+        try:
+            await context.bot.send_message(chat_id=uid, text=f"🔔 **THÔNG BÁO TỪ HỆ THỐNG**\n\n{msg}", parse_mode='Markdown')
+            success += 1
+            await asyncio.sleep(0.05)
+        except: continue
+    await update.message.reply_text(f"✅ Đã gửi tới {success}/{len(users)} người dùng.")
+
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
-    # KHỞI TẠO BOT VỚI TÊN bot_app
     bot_app = Application.builder().token(token).build()
     
-    # --- THIẾT LẬP MENU LỆNH ---
+    # --- MENU LỆNH ---
     commands = [
         BotCommand("start", "Khởi động bot"),
-        BotCommand("buy", "Xem bảng giá sản phẩm"),
+        BotCommand("buy", "Bảng giá & Các lệnh mua nhanh"),
         BotCommand("support", "Liên hệ hỗ trợ Admin")
     ]
     loop = asyncio.get_event_loop()
     loop.run_until_complete(bot_app.bot.set_my_commands(commands))
 
-    # --- ĐĂNG KÝ HANDLERS ---
+    # --- HANDLERS ---
     bot_app.add_handler(CommandHandler("start", start))
     bot_app.add_handler(CommandHandler("buy", show_catalog))
     bot_app.add_handler(CommandHandler("support", support_contact))
     bot_app.add_handler(CommandHandler("clear", admin_clear_sold))
-    bot_app.add_handler(CommandHandler("nhapcapcut", admin_import_capcut))
     bot_app.add_handler(CommandHandler("broadcast", admin_broadcast))
+    
+    # Xử lý các lệnh mua nhanh tự động (regex bắt đầu bằng /buy...)
+    bot_app.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r"^/buy[a-z0-9]+"), quick_buy_handler))
     
     bot_app.add_handler(MessageHandler(filters.Text(["📊 Xem Bảng Giá"]), show_catalog))
     bot_app.add_handler(MessageHandler(filters.Text(["☎️ Hỗ trợ & Hướng dẫn"]), support_contact))
@@ -249,10 +263,7 @@ def main():
     bot_app.add_handler(CallbackQueryHandler(handle_buy, pattern="^buy_"))
     bot_app.add_handler(CallbackQueryHandler(verify_manual, pattern="check_manual"))
     
-    # CHẠY FLASK (DÙNG BIẾN app)
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, use_reloader=False), daemon=True).start()
-    
-    # CHẠY BOT
     bot_app.run_polling()
 
 if __name__ == '__main__':
