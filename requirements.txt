@@ -1,6 +1,5 @@
-python-telegram-bot==20.x
+python-telegram-bot
 gspread
 oauth2client
 flask
 requests
-uvicorn
