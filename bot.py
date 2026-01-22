@@ -2,7 +2,7 @@ import os, json, random, string, datetime, threading, requests, re, asyncio
 from flask import Flask, request, jsonify
 from gspread import authorize
 from oauth2client.service_account import ServiceAccountCredentials
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, BotCommand
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # --- CẤU HÌNH BIẾN MÔI TRƯỜNG ---
@@ -13,7 +13,7 @@ SEPAY_API_KEY = os.getenv("SEPAY_API_KEY")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 PORT = int(os.getenv("PORT", "8000"))
 
-# BIẾN APP DÀNH CHO FLASK
+# BIẾN app DÀNH RIÊNG CHO FLASK
 app = Flask(__name__)
 pending_orders = {} 
 
@@ -114,7 +114,12 @@ async def show_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"{row['Icon']} *{row['Tên Sản Phẩm']}*: `{row['Giá Tiền']:,}`đ\n"
         if "Còn hàng" in str(row['Trạng Thái']):
             keyboard.append([InlineKeyboardButton(f"Mua {row['Tên Sản Phẩm']}", callback_query_data=f"buy_{row['Tên Sản Phẩm']}")])
-    await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    # Xử lý cho cả MessageHandler và CommandHandler
+    if update.message:
+        await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.callback_query.message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -191,11 +196,11 @@ async def admin_clear_sold(update: Update, context: ContextTypes.DEFAULT_TYPE):
             acc_sheet.append_row(headers)
             if remaining_rows:
                 acc_sheet.append_rows(remaining_rows)
-            await update.message.reply_text(f"✅ Đã xóa `{count_deleted}` acc đã bán!")
+            await update.message.reply_text(f"✅ Đã dọn dẹp xong! Đã xóa `{count_deleted}` tài khoản đã bán.")
         else:
-            await update.message.reply_text("ℹ️ Không có tài khoản nào cần dọn dẹp.")
+            await update.message.reply_text("ℹ️ Không có tài khoản nào ở trạng thái 'Đã bán' để xóa.")
     except Exception as e:
-        await update.message.reply_text(f"❌ Lỗi: {e}")
+        await update.message.reply_text(f"❌ Lỗi khi dọn dẹp: {e}")
 
 async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
@@ -217,13 +222,25 @@ async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
-    # ĐỔI TÊN BIẾN THÀNH bot_app ĐỂ KHÔNG TRÙNG VỚI Flask app
+    # KHỞI TẠO BOT VỚI TÊN bot_app
     bot_app = Application.builder().token(token).build()
     
+    # --- THIẾT LẬP MENU LỆNH ---
+    commands = [
+        BotCommand("start", "Khởi động bot"),
+        BotCommand("buy", "Xem bảng giá sản phẩm"),
+        BotCommand("support", "Liên hệ hỗ trợ Admin")
+    ]
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(bot_app.bot.set_my_commands(commands))
+
+    # --- ĐĂNG KÝ HANDLERS ---
     bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(CommandHandler("buy", show_catalog))
+    bot_app.add_handler(CommandHandler("support", support_contact))
+    bot_app.add_handler(CommandHandler("clear", admin_clear_sold))
     bot_app.add_handler(CommandHandler("nhapcapcut", admin_import_capcut))
     bot_app.add_handler(CommandHandler("broadcast", admin_broadcast))
-    bot_app.add_handler(CommandHandler("clear", admin_clear_sold))
     
     bot_app.add_handler(MessageHandler(filters.Text(["📊 Xem Bảng Giá"]), show_catalog))
     bot_app.add_handler(MessageHandler(filters.Text(["☎️ Hỗ trợ & Hướng dẫn"]), support_contact))
@@ -232,10 +249,10 @@ def main():
     bot_app.add_handler(CallbackQueryHandler(handle_buy, pattern="^buy_"))
     bot_app.add_handler(CallbackQueryHandler(verify_manual, pattern="check_manual"))
     
-    # Flask app chạy trên thread riêng
+    # CHẠY FLASK (DÙNG BIẾN app)
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, use_reloader=False), daemon=True).start()
     
-    # Telegram Bot chạy polling
+    # CHẠY BOT
     bot_app.run_polling()
 
 if __name__ == '__main__':
