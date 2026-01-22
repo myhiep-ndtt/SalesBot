@@ -15,6 +15,7 @@ PORT = int(os.getenv("PORT", "8000"))
 
 app = Flask(__name__)
 pending_orders = {} 
+
 @app.route('/')
 def home():
     return "Bot is running 24/7!", 200
@@ -25,7 +26,6 @@ def get_db():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(creds_json), scope)
     return authorize(creds).open("BotSales")
 
-# --- HÀM LƯU NGƯỜI DÙNG (CHỈ ID VÀ USERNAME) ---
 def save_user(user_id, username):
     try:
         db = get_db()
@@ -35,7 +35,6 @@ def save_user(user_id, username):
             sheet.append_row([str(user_id), username if username else "N/A"])
     except: pass
 
-# --- HÀM GIAO HÀNG (GIỮ NGUYÊN ĐỊNH DẠNG CỦA BẠN) ---
 def process_delivery(order_id, info):
     try:
         db = get_db()
@@ -53,7 +52,6 @@ def process_delivery(order_id, info):
                     order_id, info['user_id'], info['product'], info['price'], "Thành công", f"{tk}|{mk}"
                 ])
                 
-                # GIỮ NGUYÊN ĐỊNH DẠNG TIN NHẮN BAN ĐẦU CỦA BẠN
                 full_message = (
                     f"✅ **THANH TOÁN THÀNH CÔNG**\n"
                     f"━━━━━━━━━━━━━━━\n"
@@ -77,7 +75,6 @@ def process_delivery(order_id, info):
         print(f"Lỗi Giao Hàng: {e}")
         return False
 
-# --- WEBHOOK SEPAY ---
 @app.route('/sepay-webhook', methods=['POST'])
 def sepay_webhook():
     if request.headers.get("Authorization") != f"Apikey {WEBHOOK_SECRET}":
@@ -95,9 +92,20 @@ def sepay_webhook():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     threading.Thread(target=save_user, args=(user.id, user.username)).start()
-    btns = [["📊 Xem Bảng Giá"], ["💳 Hướng dẫn", "☎️ Hỗ trợ"]]
+    # THAY ĐỔI: Chỉ để lại 2 nút chính
+    btns = [["📊 Xem Bảng Giá"], ["☎️ Hỗ trợ & Hướng dẫn"]]
     if user.id == ADMIN_ID: btns.append(["📥 Nhập Kho Hàng Loạt"])
     await update.message.reply_text("🛒 Shop Acc Premium NDTT Auto 24/7 kính chào quý khách!", reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True))
+
+async def support_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # THAY ĐỔI: Phản hồi thông tin liên hệ với link Telegram cá nhân
+    keyboard = [[InlineKeyboardButton("💬 Liên hệ Admin @NgDanhThanhTrung", url="https://t.me/NgDanhThanhTrung")]]
+    await update.message.reply_text(
+        "☎️ **HỖ TRỢ & HƯỚNG DẪN**\n\n"
+        "Nếu bạn cần hỗ trợ hoặc hướng dẫn mua hàng, vui lòng nhấn vào nút bên dưới để nhắn tin trực tiếp với Admin.",
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def show_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = get_db().worksheet("DataBot").get_all_records()
@@ -143,28 +151,6 @@ async def verify_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except: pass
 
 # --- ADMIN COMMANDS ---
-async def admin_import_capcut(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', update.message.text)
-    if emails:
-        new_rows = [["CapCut Pro", e, "hung@1234", "Sẵn sàng", f"Auto {datetime.datetime.now().strftime('%d/%m')}"] for e in emails]
-        get_db().worksheet("acc").append_rows(new_rows)
-        await update.message.reply_text(f"✅ Đã nạp `{len(emails)}` acc CapCut Pro thành công!")
-
-async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    msg = update.message.text.replace("/broadcast", "").strip()
-    if not msg: return
-    users = get_db().worksheet("Users").col_values(1)[1:]
-    success = 0
-    for uid in users:
-        try:
-            await context.bot.send_message(chat_id=uid, text=f"🔔 **THÔNG BÁO TỪ HỆ THỐNG**\n\n{msg}", parse_mode='Markdown')
-            success += 1
-            await asyncio.sleep(0.05)
-        except: continue
-    await update.message.reply_text(f"✅ Đã gửi tới {success}/{len(users)} người dùng.")
-
 async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     text = update.message.text
@@ -188,9 +174,10 @@ def main():
     application = Application.builder().token(token).build()
     
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("nhapcapcut", admin_import_capcut))
-    application.add_handler(CommandHandler("broadcast", admin_broadcast))
     application.add_handler(MessageHandler(filters.Text(["📊 Xem Bảng Giá"]), show_catalog))
+    # THAY ĐỔI: Handler xử lý nút Liên hệ/Hướng dẫn
+    application.add_handler(MessageHandler(filters.Text(["☎️ Hỗ trợ & Hướng dẫn"]), support_contact))
+    
     application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^NHAP"), admin_import))
     application.add_handler(CallbackQueryHandler(handle_buy, pattern="^buy_"))
     application.add_handler(CallbackQueryHandler(verify_manual, pattern="check_manual"))
