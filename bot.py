@@ -13,6 +13,7 @@ SEPAY_API_KEY = os.getenv("SEPAY_API_KEY")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 PORT = int(os.getenv("PORT", "8000"))
 
+# BIẾN APP DÀNH CHO FLASK
 app = Flask(__name__)
 pending_orders = {} 
 
@@ -180,30 +181,22 @@ async def admin_clear_sold(update: Update, context: ContextTypes.DEFAULT_TYPE):
         headers = ["Tên Sản Phẩm", "Tài khoản", "Mật khẩu", "Trạng Thái", "Ghi chú"]
         remaining_rows = []
         count_deleted = 0
-        
         for row in data:
             if row.get('Trạng Thái') != "Đã bán":
-                remaining_rows.append([
-                    row.get('Tên Sản Phẩm'), 
-                    row.get('Tài khoản'), 
-                    row.get('Mật khẩu'), 
-                    row.get('Trạng Thái'), 
-                    row.get('Ghi chú')
-                ])
+                remaining_rows.append([row.get('Tên Sản Phẩm'), row.get('Tài khoản'), row.get('Mật khẩu'), row.get('Trạng Thái'), row.get('Ghi chú')])
             else:
                 count_deleted += 1
-        
         if count_deleted > 0:
             acc_sheet.clear()
             acc_sheet.append_row(headers)
             if remaining_rows:
                 acc_sheet.append_rows(remaining_rows)
-            await update.message.reply_text(f"✅ Đã dọn dẹp xong! Đã xóa `{count_deleted}` tài khoản đã bán.")
+            await update.message.reply_text(f"✅ Đã xóa `{count_deleted}` acc đã bán!")
         else:
-            await update.message.reply_text("ℹ️ Không có tài khoản nào ở trạng thái 'Đã bán' để xóa.")            
+            await update.message.reply_text("ℹ️ Không có tài khoản nào cần dọn dẹp.")
     except Exception as e:
-        await update.message.reply_text(f"❌ Lỗi khi dọn dẹp: {e}")
-        
+        await update.message.reply_text(f"❌ Lỗi: {e}")
+
 async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     text = update.message.text
@@ -224,20 +217,26 @@ async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
-    app = Application.builder().token(token).build()
+    # ĐỔI TÊN BIẾN THÀNH bot_app ĐỂ KHÔNG TRÙNG VỚI Flask app
+    bot_app = Application.builder().token(token).build()
     
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("nhapcapcut", admin_import_capcut))
-    app.add_handler(CommandHandler("broadcast", admin_broadcast))
-    app.add_handler(CommandHandler("clear", admin_clear_sold))
-    app.add_handler(MessageHandler(filters.Text(["📊 Xem Bảng Giá"]), show_catalog))
-    app.add_handler(MessageHandler(filters.Text(["☎️ Hỗ trợ & Hướng dẫn"]), support_contact))
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^NHAP"), admin_import))
-    app.add_handler(CallbackQueryHandler(handle_buy, pattern="^buy_"))
-    app.add_handler(CallbackQueryHandler(verify_manual, pattern="check_manual"))
+    bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(CommandHandler("nhapcapcut", admin_import_capcut))
+    bot_app.add_handler(CommandHandler("broadcast", admin_broadcast))
+    bot_app.add_handler(CommandHandler("clear", admin_clear_sold))
     
-    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=PORT), daemon=True).start()
-    app.run_polling()
+    bot_app.add_handler(MessageHandler(filters.Text(["📊 Xem Bảng Giá"]), show_catalog))
+    bot_app.add_handler(MessageHandler(filters.Text(["☎️ Hỗ trợ & Hướng dẫn"]), support_contact))
+    bot_app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^NHAP"), admin_import))
+    
+    bot_app.add_handler(CallbackQueryHandler(handle_buy, pattern="^buy_"))
+    bot_app.add_handler(CallbackQueryHandler(verify_manual, pattern="check_manual"))
+    
+    # Flask app chạy trên thread riêng
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=PORT, use_reloader=False), daemon=True).start()
+    
+    # Telegram Bot chạy polling
+    bot_app.run_polling()
 
 if __name__ == '__main__':
     main()
