@@ -171,6 +171,39 @@ async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except: continue
     await update.message.reply_text(f"✅ Đã gửi tới {success}/{len(users)} người dùng.")
 
+async def admin_clear_sold(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return    
+    try:
+        db = get_db()
+        acc_sheet = db.worksheet("acc")
+        data = acc_sheet.get_all_records()
+        headers = ["Tên Sản Phẩm", "Tài khoản", "Mật khẩu", "Trạng Thái", "Ghi chú"]
+        remaining_rows = []
+        count_deleted = 0
+        
+        for row in data:
+            if row.get('Trạng Thái') != "Đã bán":
+                remaining_rows.append([
+                    row.get('Tên Sản Phẩm'), 
+                    row.get('Tài khoản'), 
+                    row.get('Mật khẩu'), 
+                    row.get('Trạng Thái'), 
+                    row.get('Ghi chú')
+                ])
+            else:
+                count_deleted += 1
+        
+        if count_deleted > 0:
+            acc_sheet.clear()
+            acc_sheet.append_row(headers)
+            if remaining_rows:
+                acc_sheet.append_rows(remaining_rows)
+            await update.message.reply_text(f"✅ Đã dọn dẹp xong! Đã xóa `{count_deleted}` tài khoản đã bán.")
+        else:
+            await update.message.reply_text("ℹ️ Không có tài khoản nào ở trạng thái 'Đã bán' để xóa.")            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi khi dọn dẹp: {e}")
+        
 async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     text = update.message.text
@@ -191,19 +224,20 @@ async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
-    application = Application.builder().token(token).build()
+    app = Application.builder().token(token).build()
     
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("nhapcapcut", admin_import_capcut))
-    application.add_handler(CommandHandler("broadcast", admin_broadcast))
-    application.add_handler(MessageHandler(filters.Text(["📊 Xem Bảng Giá"]), show_catalog))
-    application.add_handler(MessageHandler(filters.Text(["☎️ Hỗ trợ & Hướng dẫn"]), support_contact))
-    application.add_handler(MessageHandler(filters.TEXT & filters.Regex("^NHAP"), admin_import))
-    application.add_handler(CallbackQueryHandler(handle_buy, pattern="^buy_"))
-    application.add_handler(CallbackQueryHandler(verify_manual, pattern="check_manual"))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("nhapcapcut", admin_import_capcut))
+    app.add_handler(CommandHandler("broadcast", admin_broadcast))
+    app.add_handler(CommandHandler("clear", admin_clear_sold))
+    app.add_handler(MessageHandler(filters.Text(["📊 Xem Bảng Giá"]), show_catalog))
+    app.add_handler(MessageHandler(filters.Text(["☎️ Hỗ trợ & Hướng dẫn"]), support_contact))
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex("^NHAP"), admin_import))
+    app.add_handler(CallbackQueryHandler(handle_buy, pattern="^buy_"))
+    app.add_handler(CallbackQueryHandler(verify_manual, pattern="check_manual"))
     
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=PORT), daemon=True).start()
-    application.run_polling()
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
