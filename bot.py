@@ -26,6 +26,12 @@ def get_db():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(creds_json), scope)
     return authorize(creds).open("BotSales")
 
+# --- HÀM HỖ TRỢ CHUYỂN TÊN SP THÀNH LỆNH ---
+def name_to_cmd(name):
+    # Xóa khoảng trắng và ký tự đặc biệt, chuyển thành chữ thường
+    # Ví dụ: "CapCut Pro" -> "capcutpro"
+    return re.sub(r'[^a-zA-Z0-9]', '', name).lower()
+
 def save_user(user_id, username):
     try:
         db = get_db()
@@ -43,7 +49,8 @@ def process_delivery(order_id, info):
         records = acc_sheet.get_all_records()
         
         for i, row in enumerate(records, 2):
-            if row['Tên Sản Phẩm'] == info['product'] and row['Trạng Thái'] == "Sẵn sàng":
+            # So khớp chính xác 100% tên sản phẩm từ Sheet
+            if str(row['Tên Sản Phẩm']).strip() == info['product'] and row['Trạng Thái'] == "Sẵn sàng":
                 tk, mk = row['Tài khoản'], row['Mật khẩu']
                 acc_sheet.update_cell(i, 4, "Đã bán")
                 
@@ -110,37 +117,41 @@ async def show_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "📊 **DANH SÁCH SẢN PHẨM**\n\n"
     keyboard = []
     for row in data:
-        # Tạo lệnh tương ứng: CapCut Pro -> /buycapcut
-        cmd_name = "/buy" + re.sub(r'[^a-zA-Z0-9]', '', row['Tên Sản Phẩm']).lower().replace("pro", "").replace("premium", "")
-        msg += f"{row['Icon']} *{row['Tên Sản Phẩm']}*: `{row['Giá Tiền']:,}`đ\n└ 📥 Mua nhanh: {cmd_name}\n\n"
+        # Tạo lệnh dựa trên tên thực tế: "ChatGPT Plus" -> "/buychatgptplus"
+        cmd = "/buy" + name_to_cmd(row['Tên Sản Phẩm'])
+        msg += f"{row['Icon']} *{row['Tên Sản Phẩm']}*: `{row['Giá Tiền']:,}`đ\n└ 📥 Mua nhanh: {cmd}\n\n"
+        
         if "Còn hàng" in str(row['Trạng Thái']):
             keyboard.append([InlineKeyboardButton(f"Mua {row['Tên Sản Phẩm']}", callback_query_data=f"buy_{row['Tên Sản Phẩm']}")])
     
     await update.effective_message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def quick_buy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    command = update.message.text.split('@')[0].replace("/", "").replace("buy", "").lower()
-    data = get_db().worksheet("DataBot").get_all_records()
+    # Ví dụ người dùng gõ: /buychatgptplus
+    raw_text = update.message.text.split('@')[0].lower() # "buychatgptplus"
     
-    selected_product = None
+    data = get_db().worksheet("DataBot").get_all_records()
+    selected = None
+
     for row in data:
-        clean_name = re.sub(r'[^a-zA-Z0-9]', '', row['Tên Sản Phẩm']).lower().replace("pro", "").replace("premium", "")
-        if clean_name == command:
-            selected_product = row
+        # So sánh: "buy" + "chatgptplus" == "/buychatgptplus"
+        if ("/buy" + name_to_cmd(row['Tên Sản Phẩm'])) == raw_text:
+            selected = row
             break
             
-    if not selected_product:
-        return # Nếu gõ sai lệnh thì không phản hồi hoặc báo lỗi tùy bạn
-
-    product = selected_product['Tên Sản Phẩm']
-    price = int(selected_product['Giá Tiền'])
-    order_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    pending_orders[order_id] = {"user_id": update.effective_user.id, "product": product, "price": price}
-    context.user_data['last_id'] = order_id
-    
-    qr_url = f"https://img.vietqr.io/image/{BANK_ID}-{BANK_ACC}-compact2.png?amount={price}&addInfo={order_id}"
-    await update.message.reply_photo(photo=qr_url, caption=f"💳 **THANH TOÁN**\n📦 SP: {product}\n💰 Giá: `{price:,}`đ\n📝 Nội dung: `{order_id}`", 
-                                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Kiểm tra thanh toán", callback_query_data="check_manual")]]))
+    if selected:
+        product = selected['Tên Sản Phẩm']
+        price = int(selected['Giá Tiền'])
+        order_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        pending_orders[order_id] = {"user_id": update.effective_user.id, "product": product, "price": price}
+        context.user_data['last_id'] = order_id
+        
+        qr_url = f"https://img.vietqr.io/image/{BANK_ID}-{BANK_ACC}-compact2.png?amount={price}&addInfo={order_id}"
+        await update.message.reply_photo(
+            photo=qr_url, 
+            caption=f"💳 **THANH TOÁN**\n📦 SP: {product}\n💰 Giá: `{price:,}`đ\n📝 Nội dung: `{order_id}`", 
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Kiểm tra thanh toán", callback_query_data="check_manual")]])
+        )
 
 async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -240,8 +251,8 @@ def main():
     # --- MENU LỆNH ---
     commands = [
         BotCommand("start", "Khởi động bot"),
-        BotCommand("buy", "Bảng giá & Các lệnh mua nhanh"),
-        BotCommand("support", "Liên hệ hỗ trợ Admin")
+        BotCommand("buy", "Xem bảng giá & lệnh mua"),
+        BotCommand("support", "Liên hệ hỗ trợ")
     ]
     loop = asyncio.get_event_loop()
     loop.run_until_complete(bot_app.bot.set_my_commands(commands))
@@ -253,8 +264,8 @@ def main():
     bot_app.add_handler(CommandHandler("clear", admin_clear_sold))
     bot_app.add_handler(CommandHandler("broadcast", admin_broadcast))
     
-    # Xử lý các lệnh mua nhanh tự động (regex bắt đầu bằng /buy...)
-    bot_app.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r"^/buy[a-z0-9]+"), quick_buy_handler))
+    # Bắt tất cả các lệnh bắt đầu bằng /buy...
+    bot_app.add_handler(MessageHandler(filters.COMMAND & filters.Regex(r"^/buy"), quick_buy_handler))
     
     bot_app.add_handler(MessageHandler(filters.Text(["📊 Xem Bảng Giá"]), show_catalog))
     bot_app.add_handler(MessageHandler(filters.Text(["☎️ Hỗ trợ & Hướng dẫn"]), support_contact))
