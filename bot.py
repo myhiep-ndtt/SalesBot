@@ -14,7 +14,7 @@ WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 PORT = int(os.getenv("PORT", "8000"))
 
 app = Flask(__name__)
-pending_orders = {} # Bộ nhớ tạm để khớp mã đơn
+pending_orders = {} 
 
 def get_db():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -22,7 +22,7 @@ def get_db():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(json.loads(creds_json), scope)
     return authorize(creds).open("BotSales")
 
-# --- HÀM GIAO HÀNG ĐỊNH DẠNG ĐẸP ---
+# --- HÀM GIAO HÀNG ĐỊNH DẠNG CHUYÊN NGHIỆP ---
 def process_delivery(order_id, info):
     try:
         db = get_db()
@@ -33,17 +33,13 @@ def process_delivery(order_id, info):
         for i, row in enumerate(records, 2):
             if row['Tên Sản Phẩm'] == info['product'] and row['Trạng Thái'] == "Sẵn sàng":
                 tk, mk = row['Tài khoản'], row['Mật khẩu']
-                
-                # Cập nhật trạng thái 'Đã bán'
                 acc_sheet.update_cell(i, 4, "Đã bán")
                 
-                # Ghi lịch sử đơn hàng
                 orders_sheet.append_row([
                     datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), 
                     order_id, info['user_id'], info['product'], info['price'], "Thành công", f"{tk}|{mk}"
                 ])
                 
-                # Tin nhắn trả về định dạng cũ chuyên nghiệp
                 full_message = (
                     f"✅ **THANH TOÁN THÀNH CÔNG**\n"
                     f"━━━━━━━━━━━━━━━\n"
@@ -67,7 +63,7 @@ def process_delivery(order_id, info):
         print(f"Lỗi Giao Hàng: {e}")
         return False
 
-# --- WEBHOOK (TỰ ĐỘNG GIAO) ---
+# --- XỬ LÝ WEBHOOK SEPAY ---
 @app.route('/sepay-webhook', methods=['POST'])
 def sepay_webhook():
     if request.headers.get("Authorization") != f"Apikey {WEBHOOK_SECRET}":
@@ -83,17 +79,17 @@ def sepay_webhook():
             break
     return jsonify({"status": "ok"}), 200
 
-# --- CHECK THỦ CÔNG (DÙNG SEPAY_API_KEY) ---
+# --- KIỂM TRA THÀNH TOÁN THỦ CÔNG ---
 async def verify_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     order_id = context.user_data.get('last_id')
     info = pending_orders.get(order_id)
     
     if not info:
-        await query.answer("❌ Đơn hàng đã xử lý hoặc không tồn tại.", show_alert=True)
+        await query.answer("❌ Đơn hàng không tồn tại hoặc đã xử lý.", show_alert=True)
         return
 
-    await query.answer("⌛ Đang kiểm tra giao dịch từ ngân hàng...")
+    await query.answer("⌛ Đang check giao dịch...")
     headers = {"Authorization": f"Bearer {SEPAY_API_KEY}"}
     try:
         resp = requests.get(f"https://my.sepay.vn/userapi/transactions/list?account_number={BANK_ACC}", headers=headers).json()
@@ -102,15 +98,15 @@ async def verify_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if process_delivery(order_id, info):
                     del pending_orders[order_id]
                     return
-        await query.message.reply_text("❌ Hệ thống chưa thấy tiền vào. Vui lòng thử lại sau 30 giây.")
+        await query.message.reply_text("❌ Chưa tìm thấy tiền vào. Thử lại sau 30 giây.")
     except:
-        await query.message.reply_text("❌ Lỗi kết nối SePay. Vui lòng liên hệ Admin.")
+        await query.message.reply_text("❌ Lỗi API. Liên hệ Admin.")
 
-# --- BOT HANDLERS ---
+# --- HANDLERS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     btns = [["📊 Xem Bảng Giá"], ["💳 Hướng dẫn", "☎️ Hỗ trợ"]]
     if update.effective_user.id == ADMIN_ID: btns.append(["📥 Nhập Kho Hàng Loạt"])
-    await update.message.reply_text("🛒 Chào mừng bạn đến với Shop Auto!", reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True))
+    await update.message.reply_text("🛒 Shop Acc Premium NDTT Auto 24/7 kính chào quý khách!", reply_markup=ReplyKeyboardMarkup(btns, resize_keyboard=True))
 
 async def show_catalog(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = get_db().worksheet("DataBot").get_all_records()
@@ -136,18 +132,33 @@ async def handle_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['last_id'] = order_id
 
     qr_url = f"https://img.vietqr.io/image/{BANK_ID}-{BANK_ACC}-compact2.png?amount={price}&addInfo={order_id}"
-    kb = [[InlineKeyboardButton("✅ Tôi đã chuyển khoản", callback_query_data="check_manual")]]
+    kb = [[InlineKeyboardButton("✅ Kiểm tra thanh toán", callback_query_data="check_manual")]]
     await query.message.reply_photo(photo=qr_url, caption=f"💳 **THANH TOÁN**\n📦 SP: {product}\n💰 Giá: `{price:,}`đ\n📝 Nội dung: `{order_id}`", reply_markup=InlineKeyboardMarkup(kb))
 
+# --- NHẬP KHO ADMIN (EMAIL | PASS) ---
 async def admin_import(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
-    if "NHAP" in update.message.text:
-        lines = update.message.text.split('\n')
-        product = lines[0].replace("NHAP", "").strip()
-        new_rows = [[product, l.split("|")[0].strip(), l.split("|")[1].strip(), "Sẵn sàng", "Admin"] for l in lines[1:] if "|" in l]
-        if new_rows:
-            get_db().worksheet("acc").append_rows(new_rows)
-            await update.message.reply_text(f"✅ Đã nhập {len(new_rows)} tài khoản.")
+    text = update.message.text
+    if "NHAP" in text:
+        try:
+            lines = text.split('\n')
+            product = lines[0].replace("NHAP", "").strip()
+            new_rows = []
+            for line in lines[1:]:
+                if "|" in line:
+                    parts = line.split("|")
+                    email = parts[0].replace("Email:", "").strip()
+                    password = parts[1].replace("Pass:", "").strip()
+                    if email and password:
+                        new_rows.append([product, email, password, "Sẵn sàng", f"Nhập {datetime.datetime.now().strftime('%d/%m')}"])
+            
+            if new_rows:
+                get_db().worksheet("acc").append_rows(new_rows)
+                await update.message.reply_text(f"✅ Đã nhập thành công {len(new_rows)} acc cho `{product}`")
+            else:
+                await update.message.reply_text("❌ Định dạng: Email: ... | Pass: ...")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {e}")
 
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
