@@ -15,6 +15,9 @@ PORT = int(os.getenv("PORT", "8000"))
 
 app = Flask(__name__)
 pending_orders = {} 
+@app.route('/')
+def home():
+    return "Bot is running 24/7!", 200
 
 def get_db():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
