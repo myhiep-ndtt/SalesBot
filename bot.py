@@ -26,8 +26,7 @@ class StockManager:
     @staticmethod
     def count():
         try:
-            db = get_db()
-            recs = db.worksheet("acc").get_all_records()
+            db = get_db(); recs = db.worksheet("acc").get_all_records()
             stk = {}
             for r in recs:
                 if str(r.get('Trạng Thái')).strip() in ["Sẵn sàng", "Hoạt Động"]:
@@ -45,21 +44,16 @@ class StockManager:
                    str(r.get('Trạng Thái')).strip() in ["Sẵn sàng", "Hoạt Động"]:
                     tk = str(r.get('Tài khoản', '')).strip()
                     mk = str(r.get('Mật khẩu', '')).strip()
-                    data = f"{tk} | {mk}" if mk and mk.upper() != "N/A" else tk
+                    
+                    # Logic gửi đi: Nếu có mật khẩu thì gửi "tk | mk", nếu không thì gửi "tk"
+                    final_data = f"{tk} | {mk}" if mk and mk.upper() != "N/A" else tk
+                        
                     sh.update_cell(i, 4, new_st)
-                    return data
+                    return final_data
             return None
         except: return None
 
-async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    txt = "👋 **NDTT STORE - HỆ THỐNG PREMIUM**\n\n🛒 Dịch vụ tự động 24/7\n💳 Nhận hàng ngay sau khi thanh toán thành công."
-    kb = ReplyKeyboardMarkup([["📊 Xem Bảng Giá"], ["☎️ Hỗ trợ"]], resize_keyboard=True)
-    await u.message.reply_text(txt, reply_markup=kb, parse_mode='Markdown')
-
-async def huong_dan_mua(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    txt = "📖 **HƯỚNG DẪN**\n1️⃣ Chọn sản phẩm tại /list\n2️⃣ CK đúng số tiền & nội dung đơn hàng\n3️⃣ Nhận tài khoản sau 30s."
-    await u.message.reply_text(txt, parse_mode='Markdown')
-
+# --- LOGIC NHẬP KHO CẢI TIẾN ---
 async def nhap_kho(u: Update, c: ContextTypes.DEFAULT_TYPE):
     if u.effective_user.id != ADMIN_ID: return
     raw = " ".join(c.args)
@@ -67,47 +61,38 @@ async def nhap_kho(u: Update, c: ContextTypes.DEFAULT_TYPE):
     try:
         p_name, data = raw.split("|", 1)
         p_name = p_name.strip()
-        # Regex cải tiến để lấy 100% giá trị và phân loại user|pass
-        items = re.findall(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|[a-zA-Z0-9._]{4,})(?:\|(.*?))?(?=[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|[a-zA-Z0-9._]{4,}|$)', data.strip())
+        
+        # Regex hỗ trợ cả: "tài khoản" (có ngoặc kép), email|pass, hoặc tài khoản thuần
+        # Lấy 100% giá trị bên trong ngoặc kép hoặc chuỗi text
+        items = re.findall(r'("(?:[^"]+)"|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|[a-zA-Z0-9._]{4,})(?:\|(.*?))?(?="|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|[a-zA-Z0-9._]{4,}|$)', data.strip())
+        
         if items:
             rows = []
             for it in items:
                 user = it[0].strip()
                 pass_val = it[1].strip() if it[1] else "N/A"
-                # Nếu chỉ có tài khoản, bọc trong dấu ngoặc kép
-                if pass_val == "N/A": user = f'"{user}"'
                 rows.append([p_name, user, pass_val, "Sẵn sàng", datetime.datetime.now().strftime('%d/%m %H:%M')])
+            
             get_db().worksheet("acc").append_rows(rows)
-            await u.message.reply_text(f"✅ Đã nạp {len(rows)} mục cho `{p_name}`")
+            await u.message.reply_text(f"✅ Đã nạp {len(rows)} tài khoản cho `{p_name}` (Giữ nguyên định dạng ngoặc kép).")
     except: pass
 
-async def clear_kho(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    if u.effective_user.id != ADMIN_ID: return
-    p = " ".join(c.args).strip()
-    try:
-        db = get_db(); sh = db.worksheet("acc"); r = sh.get_all_values()
-        nd = [r[0]] + [l for l in r[1:] if not (str(l[0]).strip() == p and str(l[3]).strip() in ["Sẵn sàng", "Hoạt Động"])]
-        sh.clear(); sh.update('A1', nd)
-        await u.message.reply_text(f"🗑️ Đã làm trống kho `{p}`")
-    except: pass
-
-async def lenh_xoai(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    res = StockManager.dispense("CapCut Pro", f"X_{u.effective_user.id}")
-    if res: await u.message.reply_text(f"🎁 **QUÀ TẶNG**\n🔑 `{res}`", parse_mode='Markdown')
-    else: await u.message.reply_text("🔴 Hết hàng.")
+async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    txt = "👋 **NDTT STORE**\n🛒 Hệ thống tự động 24/7\n💳 Nhận hàng ngay sau khi thanh toán."
+    kb = ReplyKeyboardMarkup([["📊 Xem Bảng Giá"], ["☎️ Hỗ trợ"]], resize_keyboard=True)
+    await u.message.reply_text(txt, reply_markup=kb, parse_mode='Markdown')
 
 async def show_catalog(u: Update, c: ContextTypes.DEFAULT_TYPE):
     try:
         db = get_db(); p_list = db.worksheet("DataBot").get_all_records(); stk = StockManager.count()
-        msg = "🚀 **DANH SÁCH SẢN PHẨM**\n\n"; kb = []
+        msg = "🚀 **DANH SÁCH DỊCH VỤ**\n\n"; kb = []
         for p in p_list:
             n = str(p.get('Tên Sản Phẩm')).strip(); pr = int(re.sub(r'[^\d]', '', str(p.get('Giá Tiền', 0))))
             qty = stk.get(n, 0)
             msg += f"🔹 **{n}**: `{pr:,}`đ ({'🟢 '+str(qty) if qty > 0 else '🔴 Hết'})\n"
             if qty > 0: kb.append([InlineKeyboardButton(f"Mua {n}", callback_data=f"buy_{n}")])
-        m = InlineKeyboardMarkup(kb)
-        if u.callback_query: await u.callback_query.message.edit_text(msg, parse_mode='Markdown', reply_markup=m)
-        else: await u.effective_message.reply_text(msg, parse_mode='Markdown', reply_markup=m)
+        if u.callback_query: await u.callback_query.message.edit_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+        else: await u.effective_message.reply_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
     except: pass
 
 async def handle_buy(u: Update, c: ContextTypes.DEFAULT_TYPE):
@@ -118,7 +103,7 @@ async def handle_buy(u: Update, c: ContextTypes.DEFAULT_TYPE):
         oid = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
         pending_orders[oid] = {"user_id": u.effective_user.id, "product": p, "price": pr}
         qr = f"https://img.vietqr.io/image/{BANK_ID}-{BANK_ACC}-compact2.png?amount={pr}&addInfo={oid}"
-        await q.message.reply_photo(photo=qr, caption=f"💳 **{p}**\n💰 `{pr:,}`đ\n📝 Nội dung: `{oid}`", parse_mode='Markdown')
+        await q.message.reply_photo(photo=qr, caption=f"💳 **{p}**\n💰 `{pr:,}`đ\n📝 `{oid}`", parse_mode='Markdown')
 
 def worker(oid, info):
     res = StockManager.dispense(info['product'], "Đã bán")
@@ -137,17 +122,12 @@ def sepay():
             del pending_orders[oid]; break
     return jsonify({"s": 200}), 200
 
-async def p_init(app: Application):
-    await app.bot.set_my_commands([BotCommand("start", "Khởi động"), BotCommand("list", "Sản phẩm"), BotCommand("buy", "Hướng dẫn"), BotCommand("contact", "Hỗ trợ")])
-
 def main():
-    bot = Application.builder().token(TELEGRAM_TOKEN).post_init(p_init).build()
-    bot.add_handler(CommandHandler("start", start)); bot.add_handler(CommandHandler("buy", huong_dan_mua))
-    bot.add_handler(CommandHandler("nhap", nhap_kho)); bot.add_handler(CommandHandler("clear", clear_kho))
-    bot.add_handler(CommandHandler("xoai", lenh_xoai)); bot.add_handler(CommandHandler("list", show_catalog))
-    bot.add_handler(CommandHandler("contact", lambda u, c: u.message.reply_text("☎️ Admin: @NgDanhThanhTrung")))
+    bot = Application.builder().token(TELEGRAM_TOKEN).build()
+    bot.add_handler(CommandHandler("start", start))
+    bot.add_handler(CommandHandler("nhap", nhap_kho))
+    bot.add_handler(CommandHandler("list", show_catalog))
     bot.add_handler(MessageHandler(filters.Text(["📊 Xem Bảng Giá"]), show_catalog))
-    bot.add_handler(MessageHandler(filters.Text(["☎️ Hỗ trợ"]), lambda u, c: u.message.reply_text("☎️ Admin: @NgDanhThanhTrung")))
     bot.add_handler(CallbackQueryHandler(handle_buy))
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=PORT), daemon=True).start()
     bot.run_polling()
