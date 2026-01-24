@@ -155,6 +155,21 @@ async def broadcast(u: Update, c: ContextTypes.DEFAULT_TYPE):
         except: continue
     await u.message.reply_text(f"✅ Đã gửi thông báo tới {success} khách hàng.")
 
+async def lenh_trung(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    res = StockManager.dispense("CapCut", "Đã tặng (Lệnh /trung)", 1)
+    
+    if res:
+        msg = (
+            "🎁 **QUÀ TẶNG BÍ MẬT**\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "Sản phẩm: **CapCut Premium**\n"
+            f"🔑 Thông tin: `{res}`\n\n"
+            "Chúc bạn có những trải nghiệm tuyệt vời!"
+        )
+        await u.message.reply_text(msg, parse_mode='Markdown')
+    else:
+        await u.message.reply_text("😢 Rất tiếc, kho quà tặng CapCut hiện đã hết. Hãy quay lại sau nhé!")
+        
 async def nhap_kho(u: Update, c: ContextTypes.DEFAULT_TYPE):
     if u.effective_user.id != ADMIN_ID: return
     raw = " ".join(c.args)
@@ -281,6 +296,7 @@ def main():
     bot.add_handler(CommandHandler("bc", broadcast))
     bot.add_handler(CommandHandler("nhap", nhap_kho))
     bot.add_handler(CommandHandler("clear", clear_kho))
+    bot.add_handler(CommandHandler("trung", lenh_trung))
     bot.add_handler(CommandHandler("clearbin", clear_bin))
     bot.add_handler(CommandHandler("list", show_catalog))
     bot.add_handler(CommandHandler("contact", lambda u, c: u.message.reply_text("✉️ Liên hệ Admin: @NgDanhThanhTrung")))
