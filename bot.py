@@ -5,7 +5,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# --- CẤU HÌNH HỆ THỐNG ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0")) 
 BANK_ID = os.getenv("BANK_ID", "")
@@ -15,6 +14,19 @@ PORT = int(os.getenv("PORT", "8000"))
 
 app = Flask(__name__)
 pending_orders = {}
+
+def keep_alive():
+    url = "https://salesbot-xrz9.onrender.com"
+    while True:
+        try:
+            requests.get(url, timeout=10)
+        except:
+            pass
+        threading.Event().wait(600)
+
+@app.route('/')
+def home():
+    return "Bot is running", 200
 
 def get_db():
     try:
@@ -50,15 +62,11 @@ class StockManager:
                    str(r.get('Trạng Thái')).strip() in ["Sẵn sàng", "Hoạt Động"]:
                     tk = str(r.get('Tài khoản', '')).strip()
                     mk = str(r.get('Mật khẩu', '')).strip()
-                    
-                    # Trả hàng nguyên bản giống trong Sheet
                     final_data = f"{tk} | {mk}" if mk and mk.upper() != "N/A" else tk
                     sh.update_cell(i, 4, new_st)
                     return final_data
             return None
         except: return None
-
-# --- CÁC HÀM XỬ LÝ CHO KHÁCH HÀNG (THÂN THIỆN) ---
 
 async def start(u: Update, c: ContextTypes.DEFAULT_TYPE):
     txt = (
@@ -84,7 +92,7 @@ async def show_catalog(u: Update, c: ContextTypes.DEFAULT_TYPE):
             pr = int(re.sub(r'[^\d]', '', str(p.get('Giá Tiền', 0))))
             qty = stk.get(n, 0)
             status = f"🟢 Còn {qty}" if qty > 0 else "🔴 Hết hàng"
-            msg += f"🔹 **{n}**\n   └ Giá: `{pr:,}`đ — {status}\n\n"
+            msg += f"🔹 **{n}**\n    └ Giá: `{pr:,}`đ — {status}\n\n"
             if qty > 0:
                 kb.append([InlineKeyboardButton(f"💳 Đăng ký mua {n}", callback_data=f"buy_{n}")])
         
@@ -117,8 +125,6 @@ async def handle_buy(u: Update, c: ContextTypes.DEFAULT_TYPE):
         )
         await q.message.reply_photo(photo=qr, caption=caption, parse_mode='Markdown')
 
-# --- LỆNH QUẢN TRỊ (BẢO MẬT ADMIN) ---
-
 async def nhap_kho(u: Update, c: ContextTypes.DEFAULT_TYPE):
     if u.effective_user.id != ADMIN_ID: return
     raw = " ".join(c.args)
@@ -126,7 +132,6 @@ async def nhap_kho(u: Update, c: ContextTypes.DEFAULT_TYPE):
     try:
         p_name, data = raw.split("|", 1)
         p_name = p_name.strip()
-        # Bóc tách lấy nội dung bên trong dấu ngoặc kép để lưu vào Sheet
         items = re.findall(r'"([^"]+)"', data.strip())
         if items:
             rows = [[p_name, it.strip(), "N/A", "Sẵn sàng", datetime.datetime.now().strftime('%d/%m %H:%M')] for it in items]
@@ -161,8 +166,6 @@ async def clear_bin(u: Update, c: ContextTypes.DEFAULT_TYPE):
         await u.message.reply_text(f"🧹 **Hệ thống:** Đã xóa bỏ hoàn toàn **{removed}** tài khoản đã bán.")
     except: pass
 
-# --- XỬ LÝ GIAO HÀNG & WEBHOOK ---
-
 def worker(oid, info):
     res = StockManager.dispense(info['product'], "Đã bán")
     if res:
@@ -188,16 +191,12 @@ def sepay():
             break
     return jsonify({"s": 200}), 200
 
-# --- PHÂN QUYỀN MENU VÀ KHỞI CHẠY ---
-
 async def post_init(application: Application):
-    # Menu cho Khách
     user_cmds = [
         BotCommand("start", "🏠 Khởi động"),
         BotCommand("list", "📊 Bảng giá dịch vụ"),
         BotCommand("contact", "☎️ Liên hệ hỗ trợ")
     ]
-    # Menu cho Admin
     admin_cmds = user_cmds + [
         BotCommand("nhap", "➕ Nạp hàng"),
         BotCommand("clear", "🗑️ Xóa kho SP"),
@@ -208,6 +207,7 @@ async def post_init(application: Application):
         await application.bot.set_my_commands(admin_cmds, scope=BotCommandScopeChat(chat_id=ADMIN_ID))
 
 def main():
+    threading.Thread(target=keep_alive, daemon=True).start()
     bot = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     
     bot.add_handler(CommandHandler("start", start))
