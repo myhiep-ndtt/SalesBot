@@ -18,15 +18,12 @@ pending_orders = {}
 def keep_alive():
     url = "https://salesbot-xrz9.onrender.com"
     while True:
-        try:
-            requests.get(url, timeout=10)
-        except:
-            pass
+        try: requests.get(url, timeout=10)
+        except: pass
         threading.Event().wait(600)
 
 @app.route('/')
-def home():
-    return "Bot is running", 200
+def home(): return "Bot is running", 200
 
 def get_db():
     try:
@@ -100,10 +97,8 @@ async def show_catalog(u: Update, c: ContextTypes.DEFAULT_TYPE):
             if qty > 0:
                 kb.append([InlineKeyboardButton(f"💳 Đăng ký mua {n}", callback_data=f"ask_{n}")])
         m = InlineKeyboardMarkup(kb)
-        if u.callback_query:
-            await u.callback_query.message.edit_text(msg, parse_mode='Markdown', reply_markup=m)
-        else:
-            await u.effective_message.reply_text(msg, parse_mode='Markdown', reply_markup=m)
+        if u.callback_query: await u.callback_query.message.edit_text(msg, parse_mode='Markdown', reply_markup=m)
+        else: await u.effective_message.reply_text(msg, parse_mode='Markdown', reply_markup=m)
     except:
         await u.effective_message.reply_text("❌ Hệ thống đang bảo trì, Quý khách vui lòng thử lại sau.")
 
@@ -123,8 +118,7 @@ async def handle_ask_qty(u: Update, c: ContextTypes.DEFAULT_TYPE):
 async def handle_buy(u: Update, c: ContextTypes.DEFAULT_TYPE):
     q = u.callback_query; await q.answer()
     data_parts = q.data.split("_")
-    p = data_parts[1]
-    qty = int(data_parts[2])
+    p, qty = data_parts[1], int(data_parts[2])
     db = get_db()
     data = db.worksheet("DataBot").get_all_records()
     pr_single = next((int(re.sub(r'[^\d]', '', str(r['Giá Tiền']))) for r in data if str(r['Tên Sản Phẩm']).strip() == p), 0)
@@ -173,8 +167,7 @@ async def nhap_kho(u: Update, c: ContextTypes.DEFAULT_TYPE):
             rows = [[p_name, it.strip(), "N/A", "Sẵn sàng", datetime.datetime.now().strftime('%d/%m %H:%M')] for it in items]
             get_db().worksheet("acc").append_rows(rows)
             await u.message.reply_text(f"✅ **Admin:** Đã nạp thành công **{len(rows)}** tài khoản `{p_name}` vào kho.")
-    except Exception as e:
-        await u.message.reply_text(f"❌ Lỗi: {e}")
+    except Exception as e: await u.message.reply_text(f"❌ Lỗi: {e}")
 
 async def clear_kho(u: Update, c: ContextTypes.DEFAULT_TYPE):
     if u.effective_user.id != ADMIN_ID: return
@@ -184,8 +177,7 @@ async def clear_kho(u: Update, c: ContextTypes.DEFAULT_TYPE):
         sh = db.worksheet("acc")
         data = sh.get_all_values()
         new_rows = [data[0]] + [r for r in data[1:] if not (str(r[0]).strip() == p_name and str(r[3]).strip() in ["Sẵn sàng", "Hoạt Động"])]
-        sh.clear()
-        sh.update('A1', new_rows)
+        sh.clear(); sh.update('A1', new_rows)
         await u.message.reply_text(f"🗑️ **Hệ thống:** Đã dọn sạch các mục khả dụng của `{p_name}`.")
     except: pass
 
@@ -197,16 +189,53 @@ async def clear_bin(u: Update, c: ContextTypes.DEFAULT_TYPE):
         data = sh.get_all_values()
         new_rows = [data[0]] + [r for r in data[1:] if str(r[3]).strip() != "Đã bán"]
         removed = len(data) - len(new_rows)
-        sh.clear()
-        sh.update('A1', new_rows)
+        sh.clear(); sh.update('A1', new_rows)
         await u.message.reply_text(f"🧹 **Hệ thống:** Đã xóa bỏ hoàn toàn **{removed}** tài khoản đã bán.")
     except: pass
+
+async def handle_report(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer("Đã gửi báo cáo lỗi tới Admin!", show_alert=True)
+    oid = q.data.replace("report_", "")
+    user = u.effective_user
+    db = get_db()
+    order = next((r for r in db.worksheet("Orders").get_all_records() if str(r.get('Mã Đơn')) == oid), None)
+    if order:
+        admin_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Đổi tài khoản mới", callback_data=f"replace_{oid}_{user.id}")]])
+        await c.bot.send_message(
+            chat_id=ADMIN_ID, 
+            text=f"🚨 **BÁO LỖI ĐƠN HÀNG**\n\n📝 Mã Đơn: `{oid}`\n📦 SP: {order.get('Tên Sản Phẩm')}\n👤 Khách: @{user.username}\n🔑 Key lỗi: `{order.get('Key Đã Giao')}`", 
+            reply_markup=admin_kb
+        )
+
+async def handle_replace(u: Update, c: ContextTypes.DEFAULT_TYPE):
+    q = u.callback_query; await q.answer()
+    _, oid, uid = q.data.split("_")
+    db = get_db()
+    order_sh = db.worksheet("Orders")
+    order = next((r for r in order_sh.get_all_records() if str(r.get('Mã Đơn')) == oid), None)
+    if not order: return
+
+    acc_sh = db.worksheet("acc")
+    acc_data = acc_sh.get_all_values()
+    for i, row in enumerate(acc_data, 1):
+        full_acc = f"{row[1]} | {row[2]}" if row[2] != "N/A" else row[1]
+        if row[0] == order.get('Tên Sản Phẩm') and full_acc.strip() == str(order.get('Key Đã Giao')).strip():
+            acc_sh.update_cell(i, 4, "Lỗi/Bảo hành"); break
+            
+    new_res = StockManager.dispense(order.get('Tên Sản Phẩm'), "Đã bán (Bảo hành)", 1)
+    if new_res:
+        await c.bot.send_message(chat_id=uid, text=f"🎁 **BẢO HÀNH THÀNH CÔNG**\n\n📦 SP: {order.get('Tên Sản Phẩm')}\n🔑 Key mới: `{new_res}`")
+        await q.edit_message_text(q.message.text + f"\n\n✅ Đã đổi: `{new_res}`")
+    else: await q.message.reply_text("❌ Kho đã hết hàng để đổi!")
 
 def worker(oid, info):
     res = StockManager.dispense(info['product'], "Đã bán", info.get('qty', 1))
     if res:
         db = get_db()
-        db.worksheet("Orders").append_row([datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), oid, info['user_id'], info['product'], info['price'], "Success", res])
+        db.worksheet("Orders").append_row([
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), 
+            oid, info['user_id'], info['product'], info['price'], "Success", res
+        ])
         msg = (
             f"🎉 **GIAO HÀNG THÀNH CÔNG!**\n"
             f"━━━━━━━━━━━━━━━━━━\n"
@@ -215,7 +244,9 @@ def worker(oid, info):
             f"🔑 Thông tin truy cập:\n`{res}`\n\n"
             f"🙏 Trân trọng cảm ơn Quý khách đã tin dùng sản phẩm của chúng tôi!"
         )
-        requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", params={"chat_id": info['user_id'], "text": msg, "parse_mode": "Markdown"})
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🚩 Báo cáo lỗi", callback_data=f"report_{oid}")]])
+        requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", 
+                     params={"chat_id": info['user_id'], "text": msg, "parse_mode": "Markdown", "reply_markup": json.dumps(kb.to_dict())})
 
 @app.route('/sepay-webhook', methods=['POST'])
 def sepay():
@@ -224,8 +255,7 @@ def sepay():
     for oid, info in list(pending_orders.items()):
         if oid in txt:
             threading.Thread(target=worker, args=(oid, info)).start()
-            del pending_orders[oid]
-            break
+            del pending_orders[oid]; break
     return jsonify({"s": 200}), 200
 
 async def post_init(application: Application):
@@ -259,8 +289,9 @@ def main():
     bot.add_handler(CallbackQueryHandler(handle_ask_qty, pattern="^ask_"))
     bot.add_handler(CallbackQueryHandler(handle_buy, pattern="^buy_"))
     bot.add_handler(CallbackQueryHandler(show_catalog, pattern="^back_catalog$"))
+    bot.add_handler(CallbackQueryHandler(handle_report, pattern="^report_"))
+    bot.add_handler(CallbackQueryHandler(handle_replace, pattern="^replace_"))
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=PORT), daemon=True).start()
     bot.run_polling()
 
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__': main()
