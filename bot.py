@@ -156,15 +156,15 @@ async def broadcast(u: Update, c: ContextTypes.DEFAULT_TYPE):
     await u.message.reply_text(f"✅ Đã gửi thông báo tới {success} khách hàng.")
 
 async def lenh_trung(u: Update, c: ContextTypes.DEFAULT_TYPE):
-    res = StockManager.dispense("CapCut", "Đã tặng (Lệnh /trung)", 1)
+    res = StockManager.dispense("CapCut Pro", "Đã tặng (Lệnh /trung)", 1)
     
     if res:
         msg = (
-            "🎁 **QUÀ TẶNG BÍ MẬT**\n"
+            "🎁 **QUÀ TẶNG ĐẶC BIỆT**\n"
             "━━━━━━━━━━━━━━━━━━\n"
-            "Sản phẩm: **CapCut Premium**\n"
-            f"🔑 Thông tin: `{res}`\n\n"
-            "Chúc bạn có những trải nghiệm tuyệt vời!"
+            "Sản phẩm: **CapCut Pro**\n"
+            f"🔑 Tài khoản: `{res}`\n\n"
+            "✨ Chúc em tạo ra những video triệu view nhé!"
         )
         await u.message.reply_text(msg, parse_mode='Markdown')
     else:
